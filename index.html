@@ -1,0 +1,273 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Ultimate City Racer Online</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101820;color:white;font-family:Arial;text-align:center;overflow:hidden;touch-action:none}
+h2{color:#00eaff;margin:8px}
+#info{display:flex;justify-content:space-around;padding:8px;font-size:13px}
+canvas{width:100%;max-width:900px;height:auto;max-height:68vh;background:#294b32;display:block;margin:auto;touch-action:none}
+#controls{display:flex;justify-content:space-around;align-items:center;padding:8px;gap:5px}
+button{background:#1768a8;color:white;border:0;border-radius:12px;padding:13px;font-weight:bold;font-size:18px;min-width:48px;touch-action:none}
+#gas{background:#178d48}
+#brake{background:#b52e36}
+#status{font-size:12px;color:#ffd66b;padding:4px}
+#cover{position:fixed;inset:0;background:#07101bee;display:flex;align-items:center;justify-content:center;z-index:5}
+.panel{background:#172b40;border:2px solid #00d9ff;border-radius:18px;padding:22px;width:88%;max-width:400px}
+.panel h1{color:#00eaff}
+.panel input{padding:12px;width:100%;border-radius:8px;margin:10px 0;font-size:17px}
+.panel button{width:100%;background:#009fc4}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<h2>🏎️ ULTIMATE CITY RACER</h2>
+<div id="info">
+ <span>💰 <b id="coins">0</b></span>
+ <span>🏆 <b id="score">0</b></span>
+ <span>🚗 <b id="players">1</b> players</span>
+</div>
+<div id="status">Connecting to multiplayer server...</div>
+<canvas id="game" width="900" height="600"></canvas>
+<div id="controls">
+ <button id="left">◀</button>
+ <button id="right">▶</button>
+ <button id="brake">BRAKE</button>
+ <button id="gas">GAS</button>
+</div>
+<div id="cover">
+ <div class="panel">
+  <h1>🌆 CITY RACER</h1>
+  <p>Explore the city and drive with players around the world!</p>
+  <input id="name" maxlength="16" placeholder="Enter your player name">
+  <button id="start">ENTER CITY 🚀</button>
+  <p style="font-size:12px;color:#bbb">Multiplayer requires the online server to be running.</p>
+ </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const W=900,H=600;
+let socket=null;
+let connected=false;
+let started=false;
+let others={};
+let coins=0,score=0,frame=0;
+let camera={x:0,y:0};
+let player={x:0,y:0,angle:0,speed:0};
+let keys={left:false,right:false,gas:false,brake:false};
+let myName="Driver";
+const CELL=660,ROAD=160,BLOCK=500;
+
+function connect(){
+ try{
+  if(typeof io==="undefined"){
+   document.getElementById("status").textContent="Server not connected yet";
+   return;
+  }
+  socket=io();
+  socket.on("connect",()=>{
+   connected=true;
+   document.getElementById("status").textContent="🟢 Online — connected!";
+   socket.emit("join",{name:myName});
+  });
+  socket.on("disconnect",()=>{
+   connected=false;
+   document.getElementById("status").textContent="🔴 Disconnected — reconnecting...";
+  });
+  socket.on("players",data=>{
+   others=data;
+   document.getElementById("players").textContent=Object.keys(others).length+1;
+  });
+ }catch(e){
+  document.getElementById("status").textContent="Offline preview";
+ }
+}
+
+function road(x,y){
+ let a=((x%CELL)+CELL)%CELL;
+ let b=((y%CELL)+CELL)%CELL;
+ return a>=BLOCK||b>=BLOCK;
+}
+
+function building(x,y){
+ let a=((x%CELL)+CELL)%CELL;
+ let b=((y%CELL)+CELL)%CELL;
+ return a>30&&a<BLOCK-30&&b>30&&b<BLOCK-30;
+}
+
+function drawCity(){
+ ctx.fillStyle="#32643a";
+ ctx.fillRect(0,0,W,H);
+
+ let minX=Math.floor((camera.x-W/2)/CELL)-1;
+ let maxX=Math.floor((camera.x+W/2)/CELL)+1;
+ let minY=Math.floor((camera.y-H/2)/CELL)-1;
+ let maxY=Math.floor((camera.y+H/2)/CELL)+1;
+
+ for(let gx=minX;gx<=maxX;gx++){
+  for(let gy=minY;gy<=maxY;gy++){
+   let bx=gx*CELL-camera.x+W/2;
+   let by=gy*CELL-camera.y+H/2;
+
+   ctx.fillStyle="#444950";
+   ctx.fillRect(bx,by+BLOCK,CELL,ROAD);
+   ctx.fillRect(bx+BLOCK,by,ROAD,CELL);
+
+   ctx.strokeStyle="#eee0a0";
+   ctx.lineWidth=3;
+   ctx.setLineDash([24,24]);
+   ctx.beginPath();
+   ctx.moveTo(bx,by+BLOCK+ROAD/2);
+   ctx.lineTo(bx+CELL,by+BLOCK+ROAD/2);
+   ctx.moveTo(bx+BLOCK+ROAD/2,by);
+   ctx.lineTo(bx+BLOCK+ROAD/2,by+CELL);
+   ctx.stroke();
+   ctx.setLineDash([]);
+
+   for(let i=0;i<8;i++){
+    let col=i%2,row=Math.floor(i/2);
+    let x=bx+25+col*230;
+    let y=by+25+row*110;
+    let colors=["#9a6952","#718798","#947c9b","#aa8758"];
+    ctx.fillStyle="#192a26";
+    ctx.fillRect(x+7,y+8,190,85);
+    ctx.fillStyle=colors[(gx+gy+i+40)%4];
+    ctx.fillRect(x,y,190,85);
+    ctx.fillStyle="#9beaff";
+    for(let wx=x+15;wx<x+180;wx+=35){
+     ctx.fillRect(wx,y+10,14,9);
+     ctx.fillRect(wx,y+65,14,9);
+    }
+   }
+  }
+ }
+}
+
+function car(x,y,angle,color,name){
+ ctx.save();
+ ctx.translate(x,y);
+ ctx.rotate(angle);
+ ctx.fillStyle="#080808";
+ ctx.fillRect(-23,-27,8,17);
+ ctx.fillRect(15,-27,8,17);
+ ctx.fillRect(-23,12,8,17);
+ ctx.fillRect(15,12,8,17);
+ ctx.fillStyle=color;
+ ctx.beginPath();
+ ctx.roundRect(-17,-35,34,70,8);
+ ctx.fill();
+ ctx.fillStyle="#8deaff";
+ ctx.fillRect(-12,-24,24,14);
+ ctx.fillRect(-12,9,24,13);
+ ctx.fillStyle="#fff";
+ ctx.fillRect(-13,-34,8,5);
+ ctx.fillRect(5,-34,8,5);
+ ctx.restore();
+ if(name){
+  ctx.fillStyle="white";
+  ctx.font="bold 13px Arial";
+  ctx.textAlign="center";
+  ctx.fillText(name,x,y-44);
+ }
+}
+
+function update(){
+ if(!started)return;
+ frame++;
+
+ if(keys.gas)player.speed+=.15;
+ if(keys.brake)player.speed-=.18;
+ player.speed*=.985;
+ player.speed=Math.max(-3,Math.min(9,player.speed));
+
+ let turn=(keys.left?-1:0)+(keys.right?1:0);
+ player.angle+=turn*.045*Math.sign(player.speed||1);
+
+ let nx=player.x+Math.sin(player.angle)*player.speed*3;
+ let ny=player.y-Math.cos(player.angle)*player.speed*3;
+
+ if(!building(nx,ny)){
+  player.x=nx;
+  player.y=ny;
+ }else{
+  player.speed=0;
+ }
+
+ if(!road(player.x,player.y))player.speed*=.92;
+
+ camera.x+=(player.x-camera.x)*.12;
+ camera.y+=(player.y-camera.y)*.12;
+
+ drawCity();
+
+ for(let id in others){
+  let p=others[id];
+  if(!p)continue;
+  car(p.x-camera.x+W/2,p.y-camera.y+H/2,p.angle||0,"#ff4545",p.name||"Player");
+ }
+
+ car(W/2,H/2,player.angle,"#00aaff",myName);
+
+ if(connected&&frame%3===0){
+  socket.emit("move",{
+   x:player.x,y:player.y,angle:player.angle
+  });
+ }
+
+ if(road(player.x,player.y)){
+  score++;
+  document.getElementById("score").textContent=score;
+ }
+ requestAnimationFrame(update);
+}
+
+function control(id,key){
+ let b=document.getElementById(id);
+ b.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  keys[key]=true;
+  b.setPointerCapture(e.pointerId);
+ });
+ function stop(){keys[key]=false}
+ b.addEventListener("pointerup",stop);
+ b.addEventListener("pointercancel",stop);
+ b.addEventListener("lostpointercapture",stop);
+}
+control("left","left");
+control("right","right");
+control("gas","gas");
+control("brake","brake");
+
+document.addEventListener("keydown",e=>{
+ if(e.key==="ArrowUp"||e.key==="w")keys.gas=true;
+ if(e.key==="ArrowDown"||e.key==="s")keys.brake=true;
+ if(e.key==="ArrowLeft"||e.key==="a")keys.left=true;
+ if(e.key==="ArrowRight"||e.key==="d")keys.right=true;
+});
+document.addEventListener("keyup",e=>{
+ if(e.key==="ArrowUp"||e.key==="w")keys.gas=false;
+ if(e.key==="ArrowDown"||e.key==="s")keys.brake=false;
+ if(e.key==="ArrowLeft"||e.key==="a")keys.left=false;
+ if(e.key==="ArrowRight"||e.key==="d")keys.right=false;
+});
+
+document.getElementById("start").onclick=()=>{
+ myName=document.getElementById("name").value.trim()||"Driver";
+ document.getElementById("cover").classList.add("hidden");
+ started=true;
+ connect();
+ update();
+};
+
+drawCity();
+car(W/2,H/2,0,"#00aaff","Your car");
+</script>
+</body>
+</html>
